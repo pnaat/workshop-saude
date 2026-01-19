@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitoramento Workshop</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #eef2f3; padding: 20px; }
+        h1 { text-align: center; color: #333; margin-bottom: 10px; }
+        
+        /* Status Bar */
+        #status { text-align: center; margin-bottom: 30px; font-weight: bold; padding: 10px; border-radius: 5px; }
+        .status-wait { background: #ffeeba; color: #856404; }
+        .status-ok { background: #d4edda; color: #155724; }
+        .status-err { background: #f8d7da; color: #721c24; }
+
+        /* Grid Layout */
+        .grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); 
+            gap: 20px; 
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Card Design */
+        .card { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
+            border-left: 5px solid #007bff; 
+            transition: transform 0.2s;
+        }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.1); }
+        .card h3 { margin: 0 0 10px 0; font-size: 1.2em; color: #555; }
+        .value-box { font-size: 2.5em; font-weight: bold; color: #2c3e50; text-align: center; margin: 15px 0; }
+        .unit { font-size: 0.4em; color: #999; vertical-align: super; }
+        .footer { font-size: 0.8em; color: #aaa; text-align: right; border-top: 1px solid #eee; padding-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>📊 Monitoramento em Tempo Real</h1>
+    <div id="status" class="status-wait">Conectando ao Broker...</div>
+    
+    <div class="grid" id="dashboard">
+        </div>
+
+    <script>
+        // --- CONFIGURAÇÕES BASEADAS NO SEU ARDUINO ---
+        const HOST = "d21541ee50b24da2bc981ecbbce1478b.s1.eu.hivemq.cloud"; 
+        const PORT = 8884; // Porta WebSocket (WSS)
+        const USER = "workshop"; 
+        const PASS = "Workshop1";
+        const TOPIC = "#"; // Ouve tudo para pegar todos os monitores
+
+        // Cria ID único para não dar conflito na conexão
+        const client = new Paho.MQTT.Client("wss://" + HOST + ":" + PORT + "/mqtt", "dash_" + new Date().getTime());
+
+        // Callback de erro de conexão
+        client.onConnectionLost = (obj) => { 
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = "❌ Conexão Perdida: " + obj.errorMessage;
+            statusDiv.className = "status-err";
+        };
+
+        // --- O SEGREDO ESTÁ AQUI: LÓGICA DE LEITURA ---
+
+        client.onMessageArrived = (message) => {
+            const rawPayload = message.payloadString;
+            console.log("Recebido br uto: " + rawPayload);
+
+            try {
+                // Seu Arduino envia: {"monitor1/fc/155"}
+                // Vamos limpar a string removendo {, }, e "
+                let cleanData = rawPayload.replace(/[{"}]/g, ""); 
+                // Resultado: monitor1/fc/155
+
+                // Agora separamos por barras /
+                let parts = cleanData.split('/'); 
+                // Resultado: ['monitor1', 'fc', '155']
+
+                // Verificação de segurança
+                if (parts.length >= 2) {
+                    const nome = parts[0]; // monitor1
+                    const valor = parts[1]; // 155
+                    
+                    updateCard(nome, valor);
+                } else {
+                    console.warn("Formato inesperado recebido: ", cleanData);
+                }
+
+            } catch (e) {
+                console.error("Erro ao processar mensagem: ", e);
+            }
+        };
+
+        const options = {
+            useSSL: true,
+            userName: USER,
+            password: PASS,
+            onSuccess: () => {
+                const statusDiv = document.getElementById('status');
+                statusDiv.innerHTML = "✅ Conectado! Aguardando dados dos MCUs...";
+                statusDiv.className = "status-ok";
+                client.subscribe(TOPIC);
+            },
+            onFailure: (err) => {
+                const statusDiv = document.getElementById('status');
+                statusDiv.innerHTML = "❌ Falha na conexão: " + err.errorMessage;
+                statusDiv.className = "status-err";
+            }
+        };
+
+        // Função que cria ou atualiza o card na tela
+        function updateCard(nome, valor) {
+            // Cria um ID sem espaços para o HTML (ex: card-monitor1)
+            const id = "card-" + nome.replace(/\s+/g, '');
+            let card = document.getElementById(id);
+            
+            // Se o card não existe, cria um novo
+            if (!card) {
+                card = document.createElement('div');
+                card.id = id;
+                card.className = 'card';
+                document.getElementById('dashboard').appendChild(card);
+            }
+
+            // Injeta o HTML dentro do card
+            card.innerHTML = `
+                <h3>👤 ${nome.toUpperCase()}</h3>
+                <div class="value-box">
+                    ${valor}<span class="unit">BPM</span>
+                </div>
+                <div class="footer">
+                    Recebido às ${new Date().toLocaleTimeString()}
+                </div>
+            `;
+            
+            // Efeito visual (piscar borda) para mostrar que atualizou
+            card.style.borderColor = "#2ecc71";
+            setTimeout(() => { card.style.borderColor = "#007bff"; }, 300);
+        }
+
+        // Inicia conexão
+        client.connect(options);
+    </script>
+</body>
+</html>
